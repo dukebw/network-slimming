@@ -3,9 +3,9 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 from torchvision import datasets, transforms
-from models import *
+from models import channel_selection
+from models import resnet
 
 
 # Prune settings
@@ -63,7 +63,7 @@ for m in model.modules():
 
 y, i = torch.sort(bn)
 thre_index = int(total * args.percent)
-thre = y[thre_index]
+thre = y[thre_index].cuda(non_blocking=True)
 
 
 pruned = 0
@@ -109,7 +109,6 @@ def test(model):
     for data, target in test_loader:
         if args.cuda:
             data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
         output = model(data)
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
         correct += pred.eq(target.data.view_as(pred)).cpu().sum()
@@ -118,7 +117,8 @@ def test(model):
         correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
     return correct / float(len(test_loader.dataset))
 
-acc = test(model)
+with torch.no_grad():
+    acc = test(model)
 
 print("Cfg:")
 print(cfg)
@@ -141,9 +141,7 @@ start_mask = torch.ones(3)
 end_mask = cfg_mask[layer_id_in_cfg]
 conv_count = 0
 
-for layer_id in range(len(old_modules)):
-    m0 = old_modules[layer_id]
-    m1 = new_modules[layer_id]
+for layer_id, (m0, m1) in enumerate(zip(old_modules, new_modules)):
     if isinstance(m0, nn.BatchNorm2d):
         idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
         if idx1.size == 1:
